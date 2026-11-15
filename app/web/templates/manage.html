@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Manage events{% endblock %}
+{% block content %}
+<div id="page" class="hidden max-w-5xl mx-auto px-4 pt-8">
+  <h1 class="font-display font-extrabold text-3xl md:text-4xl text-ink">Manage events</h1>
+
+  <section id="adminPanel" class="hidden mt-6">
+    <h2 class="font-display font-bold text-xl text-ink">Booking requests</h2>
+    <div id="bookings" class="bg-white rounded-2xl px-5 py-2 mt-3"></div>
+  </section>
+
+  <div id="noClubs" class="hidden bg-white rounded-2xl p-8 mt-6 text-center">
+    <p class="font-display font-bold text-xl text-ink">No clubs to manage yet</p>
+    <p class="mt-1">Committee leaders and presidents can create events. An administrator can give you one of those roles.</p>
+  </div>
+
+  <section id="clubArea" class="hidden mt-8">
+    <div class="flex flex-wrap items-end gap-3 justify-between">
+      <div><label class="label" for="clubSelect">Club</label><select id="clubSelect" class="field min-w-[14rem]"></select></div>
+      <button id="newBtn" class="btn btn-primary">New event</button>
+    </div>
+
+    <form id="eventForm" class="hidden bg-white rounded-2xl p-6 mt-5 space-y-4">
+      <h2 class="font-display font-bold text-xl text-ink">New event</h2>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div class="sm:col-span-2"><label class="label" for="title">Title</label><input id="title" name="title" class="field" minlength="3" maxlength="200" required></div>
+        <div><label class="label" for="category">Category</label>
+          <select id="category" name="category" class="field">
+            <option value="academic">Academic</option><option value="workshop">Workshop</option><option value="social">Social</option>
+            <option value="sports">Sports</option><option value="cultural">Cultural</option><option value="career">Career</option>
+            <option value="competition">Competition</option><option value="other" selected>Other</option>
+          </select></div>
+        <div><label class="label" for="capacity">Seats</label><input id="capacity" name="capacity" type="number" min="1" class="field" required></div>
+        <div><label class="label" for="start_time">Starts</label><input id="start_time" name="start_time" type="datetime-local" class="field" required></div>
+        <div><label class="label" for="end_time">Ends</label><input id="end_time" name="end_time" type="datetime-local" class="field" required></div>
+        <div><label class="label" for="registration_deadline">Registration closes (optional)</label><input id="registration_deadline" name="registration_deadline" type="datetime-local" class="field"></div>
+        <div><label class="label" for="venue_id">Venue</label><select id="venue_id" name="venue_id" class="field"><option value="">No venue yet</option></select>
+          <p class="text-xs mt-1">An administrator must approve the venue before you can publish.</p></div>
+        <div class="sm:col-span-2"><label class="label" for="description">Description (optional)</label><textarea id="description" name="description" rows="4" class="field"></textarea></div>
+        <div class="flex items-center gap-2"><input id="certificate_enabled" name="certificate_enabled" type="checkbox" checked class="h-4 w-4"><label for="certificate_enabled" class="font-semibold text-ink">Offer a certificate</label></div>
+        <div><label class="label" for="certificate_min_attendance">Attendance needed for it (%)</label><input id="certificate_min_attendance" name="certificate_min_attendance" type="number" min="0" max="100" value="75" class="field"></div>
+      </div>
+      <p id="formError" class="text-sm text-coral" role="alert"></p>
+      <div class="flex gap-3"><button id="saveBtn" class="btn btn-primary">Create draft</button><button type="button" id="cancelForm" class="btn btn-ghost">Close</button></div>
+    </form>
+
+    <div id="fbSummary" class="bg-white rounded-2xl px-5 py-4 mt-6"></div>
+    <h2 class="font-display font-bold text-xl text-ink mt-8">Events</h2>
+    <div id="events" class="space-y-3 mt-3"></div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, esc, requireLogin, toast, setBusy, fmtRange, statusBadge, emptyState } = CEMF;
+  const $ = (id) => document.getElementById(id);
+  let user, clubs = [], current = null;
+  const iso = (v) => new Date(v).toISOString();
+
+  async function loadBookings() {
+    const box = $("bookings");
+    try {
+      const list = await api("/bookings?status=pending");
+      box.innerHTML = list.length ? list.map((b) => `
+        <div class="flex flex-wrap items-center gap-3 py-3 border-b border-slate-100 last:border-0">
+          <div class="flex-1 min-w-[12rem]">
+            <p class="font-semibold text-ink">${esc(b.resource_name)}${b.quantity > 1 ? ` (${b.quantity} units)` : ""}</p>
+            <p class="text-sm">${esc(b.event_title || "No event")}: ${esc(fmtRange(b.start_time, b.end_time))}</p>
+          </div>
+          <button class="btn btn-primary" data-act="approved" data-id="${esc(b.id)}">Approve</button>
+          <button class="btn btn-danger" data-act="rejected" data-id="${esc(b.id)}">Reject</button>
+        </div>`).join("") : `<p class="py-3">No booking requests are waiting for review.</p>`;
+    } catch (e) { box.innerHTML = `<p class="py-3 text-coral">${esc(e.message)}</p>`; }
+  }
+  $("bookings").addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    setBusy(btn, true);
+    try {
+      await api(`/bookings/${encodeURIComponent(btn.dataset.id)}/status`, { method: "PATCH", body: { status: btn.dataset.act } });
+      toast(btn.dataset.act === "approved" ? "Booking approved" : "Booking rejected");
+      loadBookings(); loadEvents();
+    } catch (e) { toast(e.message, "error"); setBusy(btn, false); }
+  });
+
+  async function loadSummary() {
+    const box = $("fbSummary");
+    try {
+      const s = await api(`/clubs/${encodeURIComponent(current)}/feedback-summary`);
+      const rated = s.events.filter((e) => e.responses > 0).length;
+      box.innerHTML = s.total_responses
+        ? `<p><span class="font-display font-bold text-2xl text-ink">${s.average_overall} out of 5</span> average rating from ${s.total_responses} ${s.total_responses === 1 ? "response" : "responses"} across ${rated} ${rated === 1 ? "event" : "events"}</p>`
+        : `<p>No feedback yet. Ratings from attendees appear here after your events.</p>`;
+    } catch (e) { box.innerHTML = ""; }
+  }
+
+  async function loadVenues() {
+    try {
+      const venues = await api("/resources?resource_type=venue");
+      $("venue_id").insertAdjacentHTML("beforeend", venues.map((v) => `<option value="${esc(v.id)}">${esc(v.name)} (${v.capacity} seats)</option>`).join(""));
+    } catch (e) { /* the form still works without a venue */ }
+  }
+
+  async function loadEvents() {
+    const box = $("events");
+    box.innerHTML = "<p>Loading events...</p>";
+    try {
+      const list = await api(`/clubs/${encodeURIComponent(current)}/events?limit=100`);
+      if (!list.length) { box.innerHTML = `<div class="grid">${emptyState("No events yet", "Choose New event to create your first draft.")}</div>`; return; }
+      box.innerHTML = list.map((e) => {
+        const ended = new Date(e.end_time) < new Date();
+        const btns = [];
+        if (e.status === "published" || e.status === "completed") btns.push(["checkin", "Check-in", "btn-ghost"], ["report", "Report", "btn-ghost"]);
+        if (e.status !== "draft") btns.push(["attendees", "Attendees", "btn-ghost"]);
+        if (e.status === "draft") btns.push(["publish", "Publish", "btn-primary"]);
+        if (e.status === "published" && ended) btns.push(["complete", "Mark completed", "btn-primary"]);
+        if (e.status === "draft" || e.status === "published") btns.push(["cancel", "Cancel event", "btn-danger"]);
+        return `<div class="bg-white rounded-xl"><div class="p-4 flex flex-wrap items-center gap-3">
+          <div class="flex-1 min-w-[14rem]">
+            <a href="/events/${esc(e.id)}" class="font-display font-bold text-ink hover:text-brand">${esc(e.title)}</a>
+            <p class="text-sm">${esc(fmtRange(e.start_time, e.end_time))}. ${e.registered_count} of ${e.capacity} seats taken.</p>
+          </div>
+          ${statusBadge(e.status)}
+          ${btns.map(([act, label, cls]) => `<button class="btn ${cls}" data-act="${act}" data-id="${esc(e.id)}">${label}</button>`).join("")}
+        </div><div class="attendees hidden px-4 pb-4"></div></div>`;
+      }).join("");
+    } catch (e) { box.innerHTML = `<p class="text-coral">${esc(e.message)}</p>`; }
+  }
+
+  const DONE = { publish: "Event published", cancel: "Event cancelled", complete: "Event completed. Certificates were issued to eligible attendees." };
+  $("events").addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    if (btn.dataset.act === "attendees") { toggleAttendees(btn); return; }
+    if (btn.dataset.act === "report") { location.href = `/reports/${encodeURIComponent(btn.dataset.id)}`; return; }
+    if (btn.dataset.act === "checkin") { location.href = `/scan/${encodeURIComponent(btn.dataset.id)}`; return; }
+    if (btn.dataset.act === "cancel" && !confirm("Cancel this event? Its venue and equipment bookings will be released.")) return;
+    setBusy(btn, true);
+    try {
+      await api(`/events/${encodeURIComponent(btn.dataset.id)}/${btn.dataset.act}`, { method: "POST" });
+      toast(DONE[btn.dataset.act]);
+      loadEvents();
+    } catch (e) { toast(e.message, "error"); setBusy(btn, false); }
+  });
+
+  async function toggleAttendees(btn) {
+    const panel = btn.closest(".bg-white").querySelector(".attendees");
+    if (!panel.classList.toggle("hidden") === false) return;
+    panel.innerHTML = "<p>Loading attendees...</p>";
+    try {
+      const list = await api(`/events/${encodeURIComponent(btn.dataset.id)}/registrations`);
+      panel.innerHTML = list.length ? `<ul class="divide-y divide-slate-100 border-t border-slate-100">${list.map((a) => `
+        <li class="py-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span class="font-semibold text-ink min-w-[10rem]">${esc(a.full_name)}</span>
+          <span class="text-sm flex-1 min-w-[10rem]">${esc(a.email)}${a.student_id ? `, ID ${esc(a.student_id)}` : ""}</span>
+          <span class="badge ${a.status === "confirmed" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}">${a.status === "confirmed" ? "Confirmed" : "Waitlisted"}</span>
+        </li>`).join("")}</ul>` : `<p class="border-t border-slate-100 pt-3">Nobody has registered yet.</p>`;
+    } catch (e) { panel.innerHTML = `<p class="text-coral">${esc(e.message)}</p>`; }
+  }
+
+  $("newBtn").addEventListener("click", () => { $("eventForm").classList.toggle("hidden"); $("title").focus(); });
+  $("cancelForm").addEventListener("click", () => $("eventForm").classList.add("hidden"));
+  $("clubSelect").addEventListener("change", (e) => { current = e.target.value; loadEvents(); loadSummary(); });
+
+  $("eventForm").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = ev.target, btn = $("saveBtn"), err = $("formError");
+    err.textContent = "";
+    if (!f.start_time.value || !f.end_time.value) { err.textContent = "Choose a start and end time."; return; }
+    setBusy(btn, true);
+    try {
+      const body = {
+        club_id: current, title: f.title.value.trim(), category: f.category.value,
+        description: f.description.value.trim() || null,
+        start_time: iso(f.start_time.value), end_time: iso(f.end_time.value),
+        registration_deadline: f.registration_deadline.value ? iso(f.registration_deadline.value) : null,
+        capacity: Number(f.capacity.value), venue_id: f.venue_id.value || null,
+        certificate_enabled: f.certificate_enabled.checked,
+        certificate_min_attendance: Number(f.certificate_min_attendance.value || 75),
+      };
+      await api("/events", { method: "POST", body });
+      toast(body.venue_id ? "Draft created. An administrator needs to approve the venue before you can publish." : "Draft created");
+      f.reset(); f.classList.add("hidden");
+      loadEvents();
+      if (user.global_role === "system_admin") loadBookings();
+    } catch (e) { err.textContent = e.message; }
+    setBusy(btn, false);
+  });
+
+  (async () => {
+    user = await requireLogin();
+    if (!user) return;
+    $("page").classList.remove("hidden");
+    try {
+      if (user.global_role === "system_admin") {
+        clubs = (await api("/clubs")).map((c) => ({ id: c.id, name: c.name }));
+        $("adminPanel").classList.remove("hidden");
+        loadBookings();
+      } else {
+        clubs = (await api("/clubs/mine")).filter((m) => m.role !== "member").map((m) => ({ id: m.club_id, name: m.club_name }));
+      }
+    } catch (e) { toast(e.message, "error"); }
+    if (!clubs.length) { $("noClubs").classList.remove("hidden"); return; }
+    $("clubArea").classList.remove("hidden");
+    $("clubSelect").innerHTML = clubs.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+    current = clubs[0].id;
+    loadVenues(); loadEvents(); loadSummary();
+  })();
+</script>
+{% endblock %}

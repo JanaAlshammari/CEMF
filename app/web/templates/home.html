@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Find your next campus event{% endblock %}
+{% block content %}
+<section class="bg-ink text-white">
+  <div class="max-w-6xl mx-auto px-4 py-12 md:py-16">
+    <h1 class="font-display font-extrabold text-4xl md:text-6xl leading-[1.05] max-w-3xl">Find your next campus event</h1>
+    <p class="mt-4 text-lg text-white/75 max-w-xl">Browse events from every student club on campus and see how many seats are left.</p>
+    <form action="/events" method="get" class="mt-8 flex flex-col sm:flex-row gap-3 max-w-2xl">
+      <input name="q" class="field" placeholder="Search by title, for example chess" aria-label="Search events">
+      <button class="btn btn-accent shrink-0">Search events</button>
+    </form>
+  </div>
+</section>
+
+<section class="max-w-6xl mx-auto px-4 mt-10">
+  <div class="flex items-end justify-between gap-4">
+    <h2 class="font-display font-bold text-2xl text-ink">Coming up</h2>
+    <a href="/events" class="font-semibold text-brand hover:underline">See all events</a>
+  </div>
+  <div id="grid" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-4"><p class="col-span-full">Loading events...</p></div>
+</section>
+
+<section class="max-w-6xl mx-auto px-4 mt-12">
+  <div class="flex items-end justify-between gap-4">
+    <h2 class="font-display font-bold text-2xl text-ink">Student clubs</h2>
+    <a href="/clubs" class="font-semibold text-brand hover:underline">Browse clubs</a>
+  </div>
+  <div id="clubChips" class="flex flex-wrap gap-2 mt-4"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, esc, eventCard, emptyState, errorBox } = CEMF;
+  (async () => {
+    const grid = document.getElementById("grid");
+    try {
+      const events = await api("/events?limit=6");
+      grid.innerHTML = events.length ? events.map(eventCard).join("")
+        : emptyState("No upcoming events yet", "Check back soon, or ask your club to publish one.");
+    } catch (e) { grid.innerHTML = errorBox(e.message); }
+    try {
+      const clubs = await api("/clubs");
+      document.getElementById("clubChips").innerHTML = clubs.length
+        ? clubs.slice(0, 12).map((c) => `<a href="/events?club_id=${esc(c.id)}" class="bg-white rounded-full px-4 py-2 text-sm font-semibold text-ink hover:text-brand">${esc(c.name)}</a>`).join("")
+        : `<p>No clubs have been added yet.</p>`;
+    } catch (e) { /* the clubs strip is optional */ }
+  })();
+</script>
+{% endblock %}

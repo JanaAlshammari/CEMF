@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Your ticket{% endblock %}
+{% block content %}
+<div id="page" class="hidden max-w-md mx-auto px-4 pt-8">
+  <a href="/tickets" class="no-print text-sm font-semibold text-brand hover:underline">All my tickets</a>
+  <div id="root" class="mt-3"><p>Loading ticket...</p></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, esc, requireLogin, fmtRange, errorBox } = CEMF;
+  const id = location.pathname.split("/").filter(Boolean).pop();
+
+  (async () => {
+    const user = await requireLogin();
+    if (!user) return;
+    document.getElementById("page").classList.remove("hidden");
+    const root = document.getElementById("root");
+    try {
+      const t = await api(`/registrations/${encodeURIComponent(id)}/ticket`);
+      document.title = `Ticket: ${t.event_title} | CEMF`;
+      root.innerHTML = `
+        ${t.is_valid ? "" : `<div class="rounded-xl bg-red-50 text-red-700 px-4 py-3 mb-4 font-semibold" role="alert">This ticket is no longer valid.</div>`}
+        <article class="bg-white rounded-3xl overflow-hidden shadow-sm">
+          <div class="bg-ink text-white p-6">
+            <p class="text-sm text-white/70">Admit one</p>
+            <h1 class="font-display font-extrabold text-2xl leading-tight mt-1">${esc(t.event_title)}</h1>
+            <p class="mt-3 text-white/85">${esc(fmtRange(t.event_start_time, t.event_end_time))}</p>
+            ${t.venue_name ? `<p class="text-white/85">${esc(t.venue_name)}</p>` : ""}
+          </div>
+          <div class="relative border-t-2 border-dashed border-slate-300">
+            <span class="absolute -left-3 -top-3 w-6 h-6 rounded-full bg-mist"></span>
+            <span class="absolute -right-3 -top-3 w-6 h-6 rounded-full bg-mist"></span>
+          </div>
+          <div class="p-6 text-center">
+            <img src="${esc(t.qr_image)}" alt="QR code for your ticket" width="224" height="224" class="mx-auto ${t.is_valid ? "" : "opacity-25"}">
+            <p class="mt-3 font-mono text-sm tracking-wide break-all">${esc(t.ticket_code)}</p>
+            <p class="mt-4 font-display font-bold text-xl text-ink">${esc(t.holder_name)}</p>
+            ${t.student_id ? `<p class="text-sm">Student ID ${esc(t.student_id)}</p>` : ""}
+            <p class="text-xs mt-4">Show this QR code at the entrance.</p>
+          </div>
+        </article>
+        <div class="no-print mt-4 flex gap-3">
+          <a class="btn btn-ghost" href="${esc(t.qr_image)}" download="ticket-${esc(t.ticket_code)}.png">Download QR</a>
+          <button class="btn btn-ghost" onclick="window.print()">Print</button>
+        </div>`;
+    } catch (e) {
+      root.innerHTML = e.status === 404
+        ? `<div class="bg-white rounded-2xl p-8 text-center"><p class="font-display font-bold text-xl text-ink">No ticket here</p><p class="mt-1">This registration has no active ticket. It may be cancelled or on the waitlist.</p></div>`
+        : `<div class="grid">${errorBox(e.message)}</div>`;
+    }
+  })();
+</script>
+{% endblock %}

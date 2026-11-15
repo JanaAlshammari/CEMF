@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Event{% endblock %}
+{% block content %}
+<div id="root" class="max-w-6xl mx-auto px-4 pt-8"><p>Loading event...</p></div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, esc, currentUser, toast, setBusy, fmtRange, fmtDateTime, statusBadge, seatsMeter, emptyState, errorBox, CAT, CAT_DOT } = CEMF;
+  const id = location.pathname.split("/").filter(Boolean).pop();
+  const root = document.getElementById("root");
+
+  const info = (label, value) => `<div class="bg-white rounded-xl p-4"><dt class="text-sm text-slate-500">${label}</dt><dd class="font-semibold text-ink mt-0.5">${value}</dd></div>`;
+
+  function actionPanel(e, reg, user) {
+    const closesAt = e.registration_deadline || e.start_time;
+    const closed = e.status !== "published" || new Date(closesAt) <= new Date();
+    if (reg && reg.status === "confirmed") {
+      return `<p class="rounded-xl bg-emerald-50 text-emerald-800 px-3 py-2 mt-4 font-semibold" role="status">You're registered</p>
+        <a class="btn btn-primary w-full mt-3" href="/tickets/${esc(reg.id)}">View your ticket</a>
+        <button id="cancelReg" class="btn btn-ghost w-full mt-2">Cancel registration</button>`;
+    }
+    if (reg && reg.status === "waitlisted") {
+      return `<p class="rounded-xl bg-amber-50 text-amber-800 px-3 py-2 mt-4 font-semibold" role="status">You're on the waitlist, position ${reg.queue_position}</p>
+        <p class="text-sm mt-2">If a seat opens up, your ticket will appear under My tickets.</p>
+        <button id="cancelReg" class="btn btn-ghost w-full mt-3">Leave the waitlist</button>`;
+    }
+    if (closed) return `<button class="btn btn-primary w-full mt-4" disabled>${e.status === "draft" ? "Not open yet" : "Registration closed"}</button>`;
+    if (!user) return `<a class="btn btn-primary w-full mt-4" href="/login?next=${encodeURIComponent(location.pathname)}">Log in to register</a>`;
+    return `<button id="registerBtn" class="btn btn-primary w-full mt-4">${e.seats_left === 0 ? "Join the waitlist" : "Register"}</button>
+      ${e.seats_left === 0 ? `<p class="text-xs mt-2">This event is full. Join the waitlist and you'll get a ticket automatically if a seat opens up.</p>` : ""}`;
+  }
+
+  async function loadCert() {
+    const box = document.getElementById("certBox");
+    try {
+      const a = await api(`/events/${encodeURIComponent(id)}/my-attendance`);
+      const done = `${a.sessions_attended} of ${a.total_sessions} ${a.total_sessions === 1 ? "session" : "sessions"} attended`;
+      let body;
+      if (a.certificate_id) body = `<a class="btn btn-primary w-full mt-3" href="/certificates/${esc(a.certificate_id)}">View your certificate</a>`;
+      else if (!a.event_over) body = `<p class="text-sm mt-1">Your certificate is available after the event ends, if you attend at least ${a.required_percentage}% of sessions.</p>`;
+      else if (a.eligible) body = `<button id="claimCert" class="btn btn-primary w-full mt-3">Get your certificate</button>`;
+      else body = `<p class="text-sm mt-1">You attended ${a.percentage}% of sessions. This event needs ${a.required_percentage}% for a certificate.</p>`;
+      box.innerHTML = `<h2 class="font-display font-bold text-lg text-ink">Certificate</h2><p class="text-sm mt-1">${done}</p>${body}`;
+      const claim = document.getElementById("claimCert");
+      if (claim) claim.addEventListener("click", async () => {
+        setBusy(claim, true);
+        try { const c = await api(`/events/${encodeURIComponent(id)}/certificate`, { method: "POST" }); location.href = `/certificates/${c.id}`; }
+        catch (err) { toast(err.message, "error"); setBusy(claim, false); }
+      });
+    } catch (err) { box.innerHTML = `<p class="text-sm">${esc(err.message)}</p>`; }
+  }
+
+  const ASPECTS = [["overall_rating", "Overall experience", true], ["content_rating", "Content", false],
+                   ["organization_rating", "Organisation", false], ["venue_rating", "Venue", false]];
+  function ratingField(name, label, required, value) {
+    const pills = [1, 2, 3, 4, 5].map((n) => `<label class="cursor-pointer"><input type="radio" name="${name}" value="${n}" class="peer sr-only" ${value === n ? "checked" : ""} ${required ? "required" : ""}>
+      <span class="block w-10 h-10 leading-10 text-center rounded-lg border border-slate-300 font-semibold text-ink peer-checked:bg-brand peer-checked:text-white peer-checked:border-brand peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-marigold">${n}</span></label>`).join("");
+    return `<fieldset class="mt-3"><legend class="text-sm font-semibold text-ink">${label}${required ? "" : " (optional)"}</legend><div class="flex gap-2 mt-1">${pills}</div></fieldset>`;
+  }
+
+  async function loadFeedback(editing = false) {
+    const box = document.getElementById("fbBox");
+    const eid = encodeURIComponent(id);
+    try {
+      const s = await api(`/events/${eid}/feedback/status`);
+      const head = `<h2 class="font-display font-bold text-lg text-ink">Your feedback</h2>`;
+      if (s.submitted && !editing) {
+        box.innerHTML = `${head}<p class="text-sm mt-1">Thanks for rating this event: ${s.submitted.overall_rating} out of 5.</p><button id="editFb" class="btn btn-ghost w-full mt-3">Edit my feedback</button>`;
+        document.getElementById("editFb").addEventListener("click", () => loadFeedback(true));
+        return;
+      }
+      if (!s.submitted && !s.can_submit) { box.innerHTML = `${head}<p class="text-sm mt-1">${esc(s.reason || "Feedback isn't available.")}</p>`; return; }
+      const v = s.submitted || {};
+      box.innerHTML = `${head}<form id="fbForm" class="mt-1">
+        <p class="text-xs">1 is poor, 5 is excellent.</p>
+        ${ASPECTS.map(([n, l, r]) => ratingField(n, l, r, v[n])).join("")}
+        <label class="label mt-4" for="fbComments">Comments (optional)</label><textarea id="fbComments" name="comments" rows="3" maxlength="2000" class="field">${esc(v.comments || "")}</textarea>
+        <label class="label mt-3" for="fbSuggest">What should we improve? (optional)</label><textarea id="fbSuggest" name="suggestions" rows="2" maxlength="2000" class="field">${esc(v.suggestions || "")}</textarea>
+        <label class="flex items-center gap-2 mt-3 text-sm"><input type="checkbox" name="is_anonymous" class="h-4 w-4" ${v.is_anonymous ? "checked" : ""}> Hide my name from the organisers</label>
+        <p id="fbError" class="text-sm text-coral mt-2" role="alert"></p>
+        <button class="btn btn-primary w-full mt-3">${s.submitted ? "Save changes" : "Send feedback"}</button>
+      </form>`;
+      document.getElementById("fbForm").addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const f = ev.target, btn = f.querySelector("button"), fd = new FormData(f);
+        const num = (k) => (fd.get(k) ? Number(fd.get(k)) : null);
+        setBusy(btn, true);
+        try {
+          await api(`/events/${eid}/feedback`, { method: s.submitted ? "PUT" : "POST", body: {
+            overall_rating: num("overall_rating"), content_rating: num("content_rating"),
+            organization_rating: num("organization_rating"), venue_rating: num("venue_rating"),
+            comments: fd.get("comments").trim() || null, suggestions: fd.get("suggestions").trim() || null,
+            is_anonymous: f.is_anonymous.checked } });
+          toast("Thanks for your feedback");
+          loadFeedback(false);
+        } catch (err) { document.getElementById("fbError").textContent = err.message; setBusy(btn, false); }
+      });
+    } catch (err) { box.innerHTML = `<p class="text-sm">${esc(err.message)}</p>`; }
+  }
+
+  async function load() {
+    try {
+      const e = await api(`/events/${encodeURIComponent(id)}`);
+      const user = await currentUser();
+      const [clubs, venue, reg] = await Promise.all([
+        api("/clubs").catch(() => []),
+        e.venue_id ? api(`/resources/${encodeURIComponent(e.venue_id)}`).catch(() => null) : null,
+        user ? api(`/events/${encodeURIComponent(id)}/my-registration`).catch(() => null) : null,
+      ]);
+      const club = clubs.find((c) => c.id === e.club_id);
+      const showCert = !!(reg && reg.status === "confirmed" && e.certificate_enabled && e.status !== "draft");
+      const over = e.status === "completed" || (e.status === "published" && new Date(e.end_time) <= new Date());
+      const showFb = !!(reg && reg.status === "confirmed" && over);
+      document.title = `${e.title} | CEMF`;
+
+      const notice = e.status === "published" ? "" :
+        `<div class="rounded-xl bg-amber-50 text-amber-800 px-4 py-3 mb-5" role="status">${e.status === "draft" ? "This event is a draft. Only club leaders can see it." : `This event is ${esc(e.status)}.`}</div>`;
+      const sessions = e.sessions.length > 1 ? `<h2 class="font-display font-bold text-xl text-ink mt-8">Sessions</h2>
+        <ul class="mt-3 space-y-2">${e.sessions.map((s) => `<li class="bg-white rounded-xl px-4 py-3"><span class="font-semibold text-ink">${esc(s.title)}</span><br><span class="text-sm">${esc(fmtRange(s.start_time, s.end_time))}</span></li>`).join("")}</ul>` : "";
+
+      root.innerHTML = `${notice}
+      <div class="grid lg:grid-cols-3 gap-8">
+        <div class="lg:col-span-2">
+          <div class="flex items-center gap-2 text-sm"><span class="w-2 h-2 rounded-full ${CAT_DOT[e.category] || "bg-slate-400"}"></span>${esc(CAT[e.category] || e.category)} ${statusBadge(e.status)}</div>
+          <h1 class="font-display font-extrabold text-3xl md:text-5xl text-ink mt-2 leading-tight">${esc(e.title)}</h1>
+          ${club ? `<p class="mt-2">Hosted by <a class="font-semibold text-brand hover:underline" href="/events?club_id=${esc(club.id)}">${esc(club.name)}</a></p>` : ""}
+          <dl class="mt-6 grid sm:grid-cols-2 gap-3">
+            ${info("When", esc(fmtRange(e.start_time, e.end_time)))}
+            ${info("Where", venue ? `${esc(venue.name)}${venue.location ? `<br><span class="font-normal text-sm">${esc(venue.location)}</span>` : ""}` : "Venue to be announced")}
+            ${info("Register by", e.registration_deadline ? esc(fmtDateTime(e.registration_deadline)) : "Until the event starts")}
+            ${info("Certificate", e.certificate_enabled ? `Attend at least ${Number(e.certificate_min_attendance)}% of sessions` : "Not offered")}
+          </dl>
+          ${e.description ? `<h2 class="font-display font-bold text-xl text-ink mt-8">About this event</h2><p class="mt-2 max-w-prose whitespace-pre-line">${esc(e.description)}</p>` : ""}
+          ${sessions}
+        </div>
+        <aside>
+          <div class="bg-white rounded-2xl p-5 lg:sticky lg:top-24">
+            <p class="font-display font-bold text-2xl text-ink">${e.seats_left === 0 ? "Fully booked" : `${e.seats_left} ${e.seats_left === 1 ? "seat" : "seats"} left`}</p>
+            <div class="mt-3">${seatsMeter(e)}</div>
+            <p class="text-sm mt-1">${e.registered_count} of ${e.capacity} seats taken</p>
+            ${actionPanel(e, reg, user)}
+          </div>
+          ${showCert ? `<div id="certBox" class="bg-white rounded-2xl p-5 mt-4"><p class="text-sm">Checking your attendance...</p></div>` : ""}
+          ${showFb ? `<div id="fbBox" class="bg-white rounded-2xl p-5 mt-4"><p class="text-sm">Loading...</p></div>` : ""}
+        </aside>
+      </div>`;
+
+      if (showCert) loadCert();
+      if (showFb) loadFeedback();
+      const base = `/events/${encodeURIComponent(id)}/register`;
+      const registerBtn = document.getElementById("registerBtn");
+      if (registerBtn) registerBtn.addEventListener("click", async () => {
+        setBusy(registerBtn, true);
+        try {
+          const r = await api(base, { method: "POST" });
+          toast(r.status === "confirmed" ? "You're registered. Your ticket is ready." : `You're on the waitlist, position ${r.queue_position}.`);
+          load();
+        } catch (err) { toast(err.message, "error"); setBusy(registerBtn, false); }
+      });
+      const cancelBtn = document.getElementById("cancelReg");
+      if (cancelBtn) cancelBtn.addEventListener("click", async () => {
+        if (!confirm(reg.status === "confirmed" ? "Cancel your registration? Your ticket will stop working." : "Leave the waitlist?")) return;
+        setBusy(cancelBtn, true);
+        try { await api(base, { method: "DELETE" }); toast("Registration cancelled"); load(); }
+        catch (err) { toast(err.message, "error"); setBusy(cancelBtn, false); }
+      });
+    } catch (err) {
+      root.innerHTML = err.status === 404
+        ? `<div class="grid">${emptyState("Event not found", "It may have been removed, or it hasn't been published yet.")}</div>`
+        : `<div class="grid">${errorBox(err.message)}</div>`;
+    }
+  }
+  load();
+</script>
+{% endblock %}

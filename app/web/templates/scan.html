@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Check-in{% endblock %}
+{% block content %}
+<div id="page" class="hidden max-w-6xl mx-auto px-4 pt-8">
+  <a href="/manage" class="text-sm font-semibold text-brand hover:underline">Back to manage events</a>
+  <h1 id="title" class="font-display font-extrabold text-3xl md:text-4xl text-ink mt-2">Check-in</h1>
+  <p id="summary" class="mt-1"></p>
+
+  <div class="grid lg:grid-cols-5 gap-6 mt-6">
+    <section class="lg:col-span-2 space-y-4">
+      <div class="bg-white rounded-2xl p-5">
+        <label class="label" for="session">Session</label>
+        <select id="session" class="field"></select>
+        <p class="text-xs mt-1">Automatic picks the session that is open now.</p>
+
+        <div id="camBox" class="hidden mt-4 rounded-xl overflow-hidden bg-ink aspect-square">
+          <video id="video" playsinline muted class="w-full h-full object-cover"></video>
+        </div>
+        <canvas id="canvas" class="hidden"></canvas>
+        <p id="camMsg" class="text-sm mt-3" role="status"></p>
+        <button id="camBtn" class="btn btn-primary w-full mt-3">Start camera</button>
+
+        <form id="manualForm" class="mt-5 pt-4 border-t border-slate-100">
+          <label class="label" for="code">Scanner or pasted ticket code</label>
+          <div class="flex gap-2">
+            <input id="code" class="field" autocomplete="off" placeholder="CEMF1:...">
+            <button class="btn btn-ghost shrink-0">Check in</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="bg-white rounded-2xl p-5">
+        <h2 class="font-display font-bold text-lg text-ink">Recent check-ins</h2>
+        <ul id="feed" class="mt-3 space-y-2"><li class="text-sm">Nothing scanned yet.</li></ul>
+      </div>
+    </section>
+
+    <section class="lg:col-span-3">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <h2 class="font-display font-bold text-xl text-ink">Attendance</h2>
+        <input id="filter" class="field sm:max-w-[14rem]" placeholder="Filter by name" aria-label="Filter attendees">
+      </div>
+      <div id="table" class="bg-white rounded-2xl mt-3 px-4 py-2"><p class="py-3">Loading...</p></div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+  const { api, esc, requireLogin, toast, setBusy, fmtTime, errorBox } = CEMF;
+  const $ = (n) => document.getElementById(n);
+  const id = location.pathname.split("/").filter(Boolean).pop();
+  const eid = encodeURIComponent(id);
+  let report = null, stream = null, busy = false, lastPayload = "", lastAt = 0;
+
+  // ---------- attendance table ----------
+  function renderTable() {
+    if (!report) return;
+    const q = $("filter").value.trim().toLowerCase();
+    const rows = report.attendees.filter((a) => !q || a.full_name.toLowerCase().includes(q));
+    $("table").innerHTML = rows.length ? `<ul class="divide-y divide-slate-100">${rows.map((a) => `
+      <li class="py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div class="flex-1 min-w-[11rem]">
+          <p class="font-semibold text-ink">${esc(a.full_name)}</p>
+          <p class="text-xs">${esc(a.email)}${a.student_id ? `, ID ${esc(a.student_id)}` : ""}</p>
+        </div>
+        <div class="flex items-center gap-1" aria-label="${a.sessions_attended} of ${a.total_sessions} sessions">
+          ${report.sessions.map((s) => `<span title="${esc(s.title)}" class="w-5 h-5 rounded ${a.attended_session_ids.includes(s.id) ? "bg-brand" : "bg-slate-200"}"></span>`).join("")}
+          <span class="text-sm ml-2 w-12">${a.percentage}%</span>
+        </div>
+        ${a.certificate_issued ? `<span class="badge bg-emerald-100 text-emerald-800">Certificate issued</span>`
+          : a.eligible ? `<span class="badge bg-sky-100 text-sky-800">Eligible</span>` : ""}
+        <button class="btn btn-ghost" data-reg="${esc(a.registration_id)}">Check in</button>
+      </li>`).join("")}</ul>` : `<p class="py-3">${report.attendees.length ? "No one matches that name." : "No confirmed registrations yet."}</p>`;
+    $("summary").textContent = `${report.checked_in_total} of ${report.registered_total} registered students checked in. ` +
+      (report.certificate_enabled ? `Certificates need ${report.required_percentage}% of sessions.` : "This event has no certificate.");
+  }
+
+  async function loadReport() {
+    try {
+      report = await api(`/events/${eid}/attendance`);
+      $("title").textContent = report.event_title;
+      if (!$("session").dataset.ready) {
+        $("session").innerHTML = `<option value="">Automatic</option>` +
+          report.sessions.map((s) => `<option value="${esc(s.id)}">${esc(s.title)} (${esc(fmtTime(s.start_time))})</option>`).join("");
+        $("session").dataset.ready = "1";
+      }
+      renderTable();
+    } catch (e) { $("table").innerHTML = errorBox(e.message); }
+  }
+
+  // ---------- recent feed ----------
+  function addFeed(kind, text) {
+    const styles = { ok: "bg-emerald-50 text-emerald-800", warn: "bg-amber-50 text-amber-800", error: "bg-red-50 text-red-700" };
+    const feed = $("feed");
+    if (feed.firstElementChild && !feed.firstElementChild.className) feed.innerHTML = "";
+    feed.insertAdjacentHTML("afterbegin", `<li class="rounded-lg px-3 py-2 text-sm font-semibold ${styles[kind]}">${esc(text)}</li>`);
+    while (feed.children.length > 8) feed.lastElementChild.remove();
+  }
+  function showResult(r) {
+    const who = `${r.attendee_name} (${r.session_title})`;
+    if (r.result === "checked_in") { addFeed("ok", `Checked in: ${who}`); if (navigator.vibrate) navigator.vibrate(80); }
+    else addFeed("warn", `Already checked in: ${who}`);
+  }
+
+  async function submitPayload(payload) {
+    const now = Date.now();
+    if (busy || (payload === lastPayload && now - lastAt < 4000)) return;
+    busy = true; lastPayload = payload; lastAt = now;
+    try {
+      showResult(await api(`/events/${eid}/attendance/scan`, { method: "POST", body: { payload, session_id: $("session").value || null } }));
+      loadReport();
+    } catch (e) { addFeed("error", e.message); }
+    busy = false;
+  }
+
+  // ---------- camera ----------
+  const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
+  function tick() {
+    if (!stream) return;
+    if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth) {
+      const scale = Math.min(1, 640 / video.videoWidth);
+      const w = Math.round(video.videoWidth * scale), h = Math.round(video.videoHeight * scale);
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(video, 0, 0, w, h);
+      const code = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+      if (code && code.data) submitPayload(code.data);
+    }
+    setTimeout(() => requestAnimationFrame(tick), 120);
+  }
+  function stopCamera() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; $("camBox").classList.add("hidden"); $("camBtn").textContent = "Start camera"; $("camMsg").textContent = "";
+  }
+  $("camBtn").addEventListener("click", async () => {
+    if (stream) { stopCamera(); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $("camMsg").textContent = "The camera needs a secure connection (https or localhost). You can still paste codes below."; return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream; await video.play();
+      $("camBox").classList.remove("hidden"); $("camBtn").textContent = "Stop camera";
+      $("camMsg").textContent = "Hold a ticket's QR code in front of the camera.";
+      tick();
+    } catch (e) {
+      stream = null;
+      $("camMsg").textContent = e.name === "NotAllowedError" ? "Camera permission was denied. You can still paste codes below." : "Couldn't start the camera. You can still paste codes below.";
+    }
+  });
+
+  // ---------- manual entry ----------
+  $("manualForm").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const v = $("code").value.trim();
+    if (v) { lastPayload = ""; submitPayload(v); $("code").value = ""; }
+  });
+  $("table").addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-reg]");
+    if (!btn) return;
+    setBusy(btn, true);
+    try {
+      showResult(await api(`/events/${eid}/attendance/manual`, { method: "POST", body: { registration_id: btn.dataset.reg, session_id: $("session").value || null } }));
+      await loadReport();
+    } catch (e) { toast(e.message, "error"); setBusy(btn, false); }
+  });
+  $("filter").addEventListener("input", renderTable);
+  window.addEventListener("pagehide", stopCamera);
+
+  (async () => {
+    const user = await requireLogin();
+    if (!user) return;
+    $("page").classList.remove("hidden");
+    loadReport();
+  })();
+</script>
+{% endblock %}

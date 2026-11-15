@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Events{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 pt-8">
+  <h1 class="font-display font-extrabold text-3xl md:text-4xl text-ink">Events</h1>
+  <div class="mt-5 flex flex-col sm:flex-row gap-3">
+    <input id="q" class="field sm:max-w-sm" placeholder="Search by title" aria-label="Search events">
+    <select id="category" class="field sm:max-w-[12rem]" aria-label="Category">
+      <option value="">All categories</option>
+      <option value="academic">Academic</option><option value="workshop">Workshop</option>
+      <option value="social">Social</option><option value="sports">Sports</option>
+      <option value="cultural">Cultural</option><option value="career">Career</option>
+      <option value="competition">Competition</option><option value="other">Other</option>
+    </select>
+  </div>
+  <div id="clubFilter" class="mt-3 hidden"></div>
+  <div id="grid" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-6"></div>
+  <div class="text-center mt-8"><button id="more" class="btn btn-ghost hidden">Show more events</button></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, esc, eventCard, emptyState, errorBox } = CEMF;
+  const PAGE = 12;
+  const params = new URLSearchParams(location.search);
+  const state = { q: params.get("q") || "", category: params.get("category") || "", club_id: params.get("club_id") || "", offset: 0 };
+  const $ = (id) => document.getElementById(id);
+  $("q").value = state.q;
+  $("category").value = state.category;
+
+  async function load(reset) {
+    if (reset) { state.offset = 0; $("grid").innerHTML = ""; }
+    const qs = new URLSearchParams({ limit: PAGE, offset: state.offset });
+    if (state.q) qs.set("q", state.q);
+    if (state.category) qs.set("category", state.category);
+    if (state.club_id) qs.set("club_id", state.club_id);
+    try {
+      const events = await api("/events?" + qs);
+      if (reset && !events.length) {
+        $("grid").innerHTML = emptyState("No events match", "Try a different search or category.");
+      } else {
+        $("grid").insertAdjacentHTML("beforeend", events.map(eventCard).join(""));
+      }
+      state.offset += events.length;
+      $("more").classList.toggle("hidden", events.length < PAGE);
+    } catch (e) { $("grid").innerHTML = errorBox(e.message); }
+  }
+
+  let timer;
+  $("q").addEventListener("input", (e) => { clearTimeout(timer); timer = setTimeout(() => { state.q = e.target.value.trim(); load(true); }, 300); });
+  $("category").addEventListener("change", (e) => { state.category = e.target.value; load(true); });
+  $("more").addEventListener("click", () => load(false));
+
+  if (state.club_id) {
+    api("/clubs").then((clubs) => {
+      const club = clubs.find((c) => c.id === state.club_id);
+      if (!club) return;
+      const box = $("clubFilter");
+      box.innerHTML = `<span class="inline-flex items-center gap-2 bg-white rounded-full pl-4 pr-1 py-1 text-sm font-semibold text-ink">Showing events from ${esc(club.name)}<a href="/events" class="rounded-full px-3 py-1 hover:bg-slate-100" aria-label="Clear club filter">Clear</a></span>`;
+      box.classList.remove("hidden");
+    }).catch(() => {});
+  }
+  load(true);
+</script>
+{% endblock %}

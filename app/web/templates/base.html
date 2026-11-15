@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Campus events{% endblock %} | CEMF</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Tailwind via CDN for development. We can switch to a compiled build before deployment. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: {
+      colors: { ink: "#0F2742", mist: "#EEF3F7", brand: { DEFAULT: "#0B7A75", dark: "#095F5B" }, marigold: "#F4B31D", coral: "#D64545", body: "#3B4A5C" },
+      fontFamily: { display: ['"Bricolage Grotesque"', "sans-serif"], sans: ['"Public Sans"', "system-ui", "sans-serif"] }
+    } } };
+  </script>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body class="bg-mist text-body font-sans antialiased min-h-screen flex flex-col">
+  <header class="bg-ink text-white sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center gap-6">
+      <a href="/" class="font-display font-extrabold text-xl tracking-tight">Campus Events</a>
+      <nav class="hidden md:flex items-center gap-1 text-sm" aria-label="Main">
+        <a data-nav href="/events" class="px-3 py-2 rounded-lg hover:bg-white/10 aria-[current=page]:bg-white/15">Events</a>
+        <a data-nav href="/clubs" class="px-3 py-2 rounded-lg hover:bg-white/10 aria-[current=page]:bg-white/15">Clubs</a>
+        <a data-nav data-requires-login href="/tickets" class="hidden px-3 py-2 rounded-lg hover:bg-white/10 aria-[current=page]:bg-white/15">My tickets</a>
+        <a data-nav data-requires-login href="/certificates" class="hidden px-3 py-2 rounded-lg hover:bg-white/10 aria-[current=page]:bg-white/15">Certificates</a>
+        <a data-nav data-requires-login href="/manage" class="hidden px-3 py-2 rounded-lg hover:bg-white/10 aria-[current=page]:bg-white/15">Manage</a>
+      </nav>
+      <div id="navAuth" class="ml-auto flex items-center gap-2"></div>
+      <button id="navToggle" class="md:hidden p-2 rounded-lg hover:bg-white/10" aria-label="Menu" aria-expanded="false" aria-controls="mobileMenu">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+    <div id="mobileMenu" class="hidden md:hidden border-t border-white/10 px-4 py-2 text-sm">
+      <div><a href="/events" class="block px-3 py-2 rounded-lg hover:bg-white/10">Events</a></div>
+      <div><a href="/clubs" class="block px-3 py-2 rounded-lg hover:bg-white/10">Clubs</a></div>
+      <div data-requires-login class="hidden"><a href="/tickets" class="block px-3 py-2 rounded-lg hover:bg-white/10">My tickets</a></div>
+      <div data-requires-login class="hidden"><a href="/certificates" class="block px-3 py-2 rounded-lg hover:bg-white/10">Certificates</a></div>
+      <div data-requires-login class="hidden"><a href="/manage" class="block px-3 py-2 rounded-lg hover:bg-white/10">Manage</a></div>
+    </div>
+  </header>
+
+  <main class="flex-1">{% block content %}{% endblock %}</main>
+
+  <footer class="mt-16 py-6 text-sm text-center text-slate-500">Campus Event Management Framework</footer>
+  <div id="toasts" class="fixed bottom-4 right-4 z-50 space-y-2" aria-live="polite"></div>
+
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

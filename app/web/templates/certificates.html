@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}My certificates{% endblock %}
+{% block content %}
+<div id="page" class="hidden max-w-6xl mx-auto px-4 pt-8">
+  <h1 class="font-display font-extrabold text-3xl md:text-4xl text-ink">My certificates</h1>
+  <div id="grid" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-6"><p class="col-span-full">Loading...</p></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, download, esc, requireLogin, toast, setBusy, emptyState, errorBox } = CEMF;
+  (async () => {
+    const user = await requireLogin();
+    if (!user) return;
+    document.getElementById("page").classList.remove("hidden");
+    const grid = document.getElementById("grid");
+    try {
+      const certs = await api("/certificates/me");
+      grid.innerHTML = certs.length ? certs.map((c) => `
+        <div class="bg-white rounded-2xl p-5 flex flex-col">
+          <h2 class="font-display font-bold text-lg text-ink leading-snug">${esc(c.event_title)}</h2>
+          <p class="text-sm mt-1">${esc(c.club_name)}</p>
+          <p class="text-sm">${esc(c.date_text)}</p>
+          <p class="text-xs mt-3">Code ${esc(c.verification_code)}</p>
+          <div class="flex gap-2 mt-4">
+            <a class="btn btn-primary" href="/certificates/${esc(c.id)}">View</a>
+            <button class="btn btn-ghost" data-id="${esc(c.id)}" data-code="${esc(c.verification_code)}">Download PDF</button>
+          </div>
+        </div>`).join("")
+        : emptyState("No certificates yet", "Attend an event with a certificate and you'll find it here once the event ends.");
+    } catch (e) { grid.innerHTML = errorBox(e.message); }
+    grid.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("button[data-id]");
+      if (!btn) return;
+      setBusy(btn, true);
+      try { await download(`/certificates/${encodeURIComponent(btn.dataset.id)}/pdf`, `certificate-${btn.dataset.code}.pdf`); }
+      catch (e) { toast(e.message, "error"); }
+      setBusy(btn, false);
+    });
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Clubs{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 pt-8">
+  <h1 class="font-display font-extrabold text-3xl md:text-4xl text-ink">Student clubs</h1>
+  <div id="grid" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-6"><p class="col-span-full">Loading clubs...</p></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, esc, emptyState, errorBox } = CEMF;
+  (async () => {
+    const grid = document.getElementById("grid");
+    try {
+      const clubs = await api("/clubs");
+      grid.innerHTML = clubs.length ? clubs.map((c) => `
+        <div class="bg-white rounded-2xl p-5 flex flex-col">
+          <h2 class="font-display font-bold text-xl text-ink">${esc(c.name)}</h2>
+          ${c.category ? `<p class="text-sm mt-0.5">${esc(c.category)}</p>` : ""}
+          <p class="mt-3 clamp-2 flex-1">${esc(c.description || "This club hasn't added a description yet.")}</p>
+          <a href="/events?club_id=${esc(c.id)}" class="btn btn-ghost mt-4 self-start">See events</a>
+        </div>`).join("")
+        : emptyState("No clubs yet", "Clubs appear here once an administrator creates them.");
+    } catch (e) { grid.innerHTML = errorBox(e.message); }
+  })();
+</script>
+{% endblock %}

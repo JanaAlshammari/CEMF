@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}My tickets{% endblock %}
+{% block content %}
+<div id="page" class="hidden max-w-6xl mx-auto px-4 pt-8">
+  <h1 class="font-display font-extrabold text-3xl md:text-4xl text-ink">My tickets</h1>
+  <h2 class="font-display font-bold text-xl text-ink mt-6">Upcoming</h2>
+  <div id="upcoming" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-3"><p class="col-span-full">Loading...</p></div>
+  <div id="pastBox" class="hidden">
+    <h2 class="font-display font-bold text-xl text-ink mt-10">Past events</h2>
+    <div id="past" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-3"></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, esc, requireLogin, fmtRange, emptyState, errorBox } = CEMF;
+
+  function badge(r) {
+    if (r.event_status === "cancelled") return `<span class="badge bg-red-100 text-red-700">Event cancelled</span>`;
+    if (r.status === "waitlisted") return `<span class="badge bg-amber-100 text-amber-800">Waitlist, position ${r.queue_position}</span>`;
+    return `<span class="badge bg-emerald-100 text-emerald-800">Ticket ready</span>`;
+  }
+  function card(r) {
+    const d = new Date(r.event_start_time);
+    const href = r.status === "confirmed" ? `/tickets/${esc(r.id)}` : `/events/${esc(r.event_id)}`;
+    return `<a href="${href}" class="ticket">
+      <div class="stub py-4" aria-hidden="true"><span class="font-display font-extrabold text-3xl leading-none">${d.getDate()}</span><span class="text-sm font-semibold mt-1">${esc(d.toLocaleString(undefined, { month: "short" }))}</span></div>
+      <div class="p-4 flex-1 min-w-0">
+        <h3 class="font-display font-bold text-lg text-ink leading-snug clamp-2">${esc(r.event_title)}</h3>
+        <p class="text-sm mt-1">${esc(fmtRange(r.event_start_time, r.event_end_time))}</p>
+        <div class="mt-3">${badge(r)}</div>
+      </div></a>`;
+  }
+
+  (async () => {
+    const user = await requireLogin();
+    if (!user) return;
+    document.getElementById("page").classList.remove("hidden");
+    try {
+      const regs = await api("/registrations/me");
+      const now = new Date();
+      const upcoming = regs.filter((r) => new Date(r.event_end_time) > now);
+      const past = regs.filter((r) => new Date(r.event_end_time) <= now).reverse();
+      document.getElementById("upcoming").innerHTML = upcoming.length ? upcoming.map(card).join("")
+        : emptyState("No upcoming tickets", "Find an event and register to get your ticket.");
+      if (past.length) {
+        document.getElementById("pastBox").classList.remove("hidden");
+        document.getElementById("past").innerHTML = past.map(card).join("");
+      }
+    } catch (e) { document.getElementById("upcoming").innerHTML = errorBox(e.message); }
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Certificate{% endblock %}
+{% block content %}
+<style>@media print{@page{size:landscape;margin:10mm}}</style>
+<div id="page" class="hidden max-w-4xl mx-auto px-4 pt-8">
+  <a href="/certificates" class="no-print text-sm font-semibold text-brand hover:underline">All my certificates</a>
+  <div id="root" class="mt-3"><p>Loading certificate...</p></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const { api, download, esc, requireLogin, toast, setBusy, errorBox } = CEMF;
+  const id = location.pathname.split("/").filter(Boolean).pop();
+
+  (async () => {
+    const user = await requireLogin();
+    if (!user) return;
+    document.getElementById("page").classList.remove("hidden");
+    const root = document.getElementById("root");
+    try {
+      const c = await api(`/certificates/${encodeURIComponent(id)}`);
+      document.title = `Certificate: ${c.event_title} | CEMF`;
+      root.innerHTML = `
+        <article class="bg-white border-4 border-ink p-2 shadow-sm">
+          <div class="border border-marigold px-6 py-10 sm:px-12 text-center">
+            <p class="text-sm font-semibold text-brand">Campus Event Management Framework</p>
+            <h1 class="font-display font-extrabold text-3xl sm:text-5xl text-ink mt-3">Certificate of Attendance</h1>
+            <p class="mt-6">This certifies that</p>
+            <p class="font-display font-extrabold text-3xl sm:text-4xl text-ink mt-2 pb-3 border-b-2 border-marigold inline-block px-6">${esc(c.holder_name)}</p>
+            <p class="mt-5">attended</p>
+            <p class="font-display font-bold text-2xl sm:text-3xl text-ink mt-1">${esc(c.event_title)}</p>
+            <p class="mt-2">Organised by ${esc(c.club_name)}</p>
+            <p>${esc(c.date_text)}</p>
+            <p class="text-sm mt-1">Attendance: ${c.attendance_percentage}% of sessions</p>
+            <div class="mt-8 flex flex-wrap items-end justify-between gap-4 text-left">
+              <div class="text-xs">
+                <p>Issued ${esc(new Date(c.issued_at).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }))}</p>
+                <p class="font-semibold text-ink">Verification code: ${esc(c.verification_code)}</p>
+                <p class="break-all">${esc(c.verify_url)}</p>
+              </div>
+              <div class="text-center"><img src="${esc(c.qr_image)}" alt="QR code to verify this certificate" width="96" height="96"><p class="text-xs">Scan to verify</p></div>
+            </div>
+          </div>
+        </article>
+        <div class="no-print mt-4 flex flex-wrap gap-3">
+          <button id="pdf" class="btn btn-primary">Download PDF</button>
+          <button class="btn btn-ghost" onclick="window.print()">Print</button>
+        </div>
+        <p class="no-print text-xs mt-2">Names in Arabic and other non-Latin scripts show correctly here. For those, use Print and save as PDF from your browser.</p>`;
+      const pdf = document.getElementById("pdf");
+      pdf.addEventListener("click", async () => {
+        setBusy(pdf, true);
+        try { await download(`/certificates/${encodeURIComponent(id)}/pdf`, `certificate-${c.verification_code}.pdf`); }
+        catch (e) { toast(e.message, "error"); }
+        setBusy(pdf, false);
+      });
+    } catch (e) {
+      root.innerHTML = e.status === 404
+        ? `<div class="bg-white rounded-2xl p-8 text-center"><p class="font-display font-bold text-xl text-ink">Certificate not found</p></div>`
+        : `<div class="grid">${errorBox(e.message)}</div>`;
+    }
+  })();
+</script>
+{% endblock %}
